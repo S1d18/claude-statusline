@@ -2,12 +2,14 @@
 """Claude Code status line — Python port of the justindell gist + extras.
 
 https://gist.github.com/justindell/bdb5c5ecf2549d116813f0817673b5fb (Ruby original)
-Layout: 🤖 model | 🌿 [branch] | 📁 dir ✓/✗ | 🟢 <ctx-bar> | 💰 $cost | 🔁 [Ni/Mo]
-  ✓ = git clean, ✗ = uncommitted changes;  ctx-bar = free space in context window.
+Layout: 🤖 model | 🌿 [branch] | 📁 dir ✓/✗ | 🟢 <ctx-bar> | 💰 $cost | ⏳ reset | 🔁 [Ni/Mo]
+  ✓ = git clean, ✗ = uncommitted changes;  ctx-bar = free space in context window;
+  ⏳ reset = time left in the current 5-hour usage window before the limit resets.
 Reads the status-line JSON from stdin. Windows/UTF-8 safe; never crashes.
 """
-import sys, os, re, json, subprocess
+import sys, os, re, json, glob, subprocess
 from decimal import Decimal
+from datetime import datetime, timezone, timedelta
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -17,6 +19,9 @@ except Exception:
 # Change these to match your Claude token costs https://www.anthropic.com/pricing#api
 INPUT_COST_PER_MILLION = Decimal(3)
 OUTPUT_COST_PER_MILLION = Decimal(15)
+
+# Claude usage limits reset on a rolling 5-hour "session block" window.
+SESSION_HOURS = 5
 
 COLORS = {
     "reset":   "\x1b[0m",
@@ -149,6 +154,74 @@ def context_bar(pct, width=14):
     return "".join(out) + COLORS["reset"]
 
 
+# ── session reset window (rolling 5h usage limit) ──
+_TS_RE = re.compile(
+    r'"timestamp"\s*:\s*"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)')
+
+
+def _projects_root(data):
+    """Locate the ~/.claude/projects dir; derive from transcript_path when
+    possible so CLAUDE_CONFIG_DIR and custom homes are honored."""
+    path = data.get("transcript_path")
+    if path:
+        # .../projects/<project-slug>/<session>.jsonl → up two levels
+        root = os.path.dirname(os.path.dirname(path))
+        if os.path.isdir(root):
+            return root
+    fallback = os.path.expanduser("~/.claude/projects")
+    return fallback if os.path.isdir(fallback) else None
+
+
+def _recent_timestamps(root, now):
+    """All message timestamps (UTC) from transcripts touched within the last
+    session window — the only files that can hold the active block."""
+    cutoff = (now - timedelta(hours=SESSION_HOURS)).timestamp()
+    out = []
+    try:
+        files = glob.glob(os.path.join(root, "*", "*.jsonl"))
+    except Exception:
+        return out
+    for fp in files:
+        try:
+            if os.path.getmtime(fp) < cutoff:
+                continue
+            with open(fp, encoding="utf-8", errors="ignore") as f:
+                text = f.read()
+        except Exception:
+            continue
+        for y, mo, d, h, mi, s in _TS_RE.findall(text):
+            try:
+                ts = datetime(int(y), int(mo), int(d), int(h), int(mi), int(s),
+                              tzinfo=timezone.utc)
+            except Exception:
+                continue
+            if ts >= now - timedelta(hours=SESSION_HOURS):
+                out.append(ts)
+    return out
+
+
+def session_reset_at(data, now=None):
+    """When the current 5-hour usage window resets, or None if idle/unknown."""
+    now = now or datetime.now(timezone.utc)
+    root = _projects_root(data)
+    if not root:
+        return None
+    stamps = _recent_timestamps(root, now)
+    if not stamps:
+        return None
+    stamps.sort()
+    window = timedelta(hours=SESSION_HOURS)
+    block_start = stamps[0].replace(minute=0, second=0, microsecond=0)
+    last = stamps[0]
+    for ts in stamps[1:]:
+        # A new block begins after a >5h idle gap or once the block is 5h old.
+        if ts - block_start >= window or ts - last > window:
+            block_start = ts.replace(minute=0, second=0, microsecond=0)
+        last = ts
+    reset = block_start + window
+    return reset if reset > now else None
+
+
 # ── sections ──
 def section_model(data):
     name = (data.get("model") or {}).get("display_name") or "Unknown Model"
@@ -193,6 +266,20 @@ def section_cost(data):
     return color("green", f"💰 ${total}")
 
 
+def section_reset(data):
+    reset = session_reset_at(data)
+    if reset is None:
+        return None
+    left = reset - datetime.now(timezone.utc)
+    mins = int(left.total_seconds() // 60)
+    if mins < 0:
+        return None
+    h, m = divmod(mins, 60)
+    label = f"{h}h{m:02d}m" if h else f"{m}m"
+    hue = "red" if mins < 30 else "yellow" if mins < 120 else "green"
+    return color(hue, f"⏳ {label}")
+
+
 def section_transfer(data):
     i = color("cyan", f"{thousands(input_tokens(data))}i")
     o = color("magenta", f"{thousands(output_tokens(data))}o")
@@ -211,6 +298,7 @@ def main():
         section_workspace(data),
         section_context(data),
         section_cost(data),
+        section_reset(data),
         section_transfer(data),
     ]
     sys.stdout.write(" | ".join(s for s in sections if s))
