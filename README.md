@@ -26,7 +26,7 @@ Pure Python, no dependencies, no `jq`. Works on Windows / macOS / Linux and neve
 Requires Python 3.8+ on your `PATH`.
 
 ```bash
-git clone https://github.com/<you>/claude-statusline.git
+git clone https://github.com/S1d18/claude-statusline.git
 cd claude-statusline
 python install.py
 ```
