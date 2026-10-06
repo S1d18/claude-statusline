@@ -2,8 +2,10 @@
 """Claude Code status line — Python port of the justindell gist + extras.
 
 https://gist.github.com/justindell/bdb5c5ecf2549d116813f0817673b5fb (Ruby original)
-Layout: 🤖 model | 🌿 [branch] | 📁 dir ✓/✗ | 🟢 <ctx-bar> | 💰 $cost | ⏳ reset | 🔁 [Ni/Mo]
+Layout: 🤖 model | 🌿 [branch] | 📁 dir ✓/✗ | 🟢 <ctx-bar> | 💰 $cost | 🔋 5h N% · 7d M% | ⏳ reset | 🔁 [Ni/Mo]
   ✓ = git clean, ✗ = uncommitted changes;  ctx-bar = free space in context window;
+  🔋 = share of the 5-hour session limit and the weekly limit still LEFT
+       (claude.ai Pro/Max only — Claude Code sends `rate_limits` after the first reply);
   ⏳ reset = time left in the current 5-hour usage window before the limit resets.
 Reads the status-line JSON from stdin. Windows/UTF-8 safe; never crashes.
 """
@@ -200,9 +202,25 @@ def _recent_timestamps(root, now):
     return out
 
 
+def rate_limit(data, window):
+    """`rate_limits.<window>` dict from Claude Code (five_hour / seven_day), or {}."""
+    rl = data.get("rate_limits") or {}
+    w = rl.get(window) if isinstance(rl, dict) else None
+    return w if isinstance(w, dict) else {}
+
+
 def session_reset_at(data, now=None):
     """When the current 5-hour usage window resets, or None if idle/unknown."""
     now = now or datetime.now(timezone.utc)
+    # Prefer the authoritative value Claude Code reports for subscribers.
+    try:
+        ts = rate_limit(data, "five_hour").get("resets_at")
+        if ts is not None:
+            reset = datetime.fromtimestamp(float(ts), timezone.utc)
+            return reset if reset > now else None
+    except Exception:
+        pass
+    # Fallback: reconstruct the block from local transcript timestamps.
     root = _projects_root(data)
     if not root:
         return None
@@ -266,6 +284,29 @@ def section_cost(data):
     return color("green", f"💰 ${total}")
 
 
+def _left_pct(data, window):
+    used = rate_limit(data, window).get("used_percentage")
+    if used is None:
+        return None
+    try:
+        return max(0.0, min(100.0, 100.0 - float(used)))
+    except Exception:
+        return None
+
+
+def section_limits(data):
+    parts = []
+    for label, window in (("5h", "five_hour"), ("7d", "seven_day")):
+        left = _left_pct(data, window)
+        if left is None:
+            continue
+        hue = "red" if left < 10 else "yellow" if left < 30 else "green"
+        parts.append(color(hue, f"{label} {left:.0f}%"))
+    if not parts:
+        return None
+    return "🔋 " + color("gray", " · ").join(parts)
+
+
 def section_reset(data):
     reset = session_reset_at(data)
     if reset is None:
@@ -298,6 +339,7 @@ def main():
         section_workspace(data),
         section_context(data),
         section_cost(data),
+        section_limits(data),
         section_reset(data),
         section_transfer(data),
     ]

@@ -1,11 +1,11 @@
 # Claude Code Status Line
 
-A compact, colorful status line for [Claude Code](https://claude.com/claude-code) — model, git branch + dirty state, working directory, a live context-window gauge, session cost, time left until the usage limit resets, and token transfer.
+A compact, colorful status line for [Claude Code](https://claude.com/claude-code) — model, git branch + dirty state, working directory, a live context-window gauge, session cost, how much of the 5-hour and weekly limits is left, time left until the usage limit resets, and token transfer.
 
 ![status line screenshot](assets/statusline.png)
 
 ```
-🤖 Claude Opus 4.8 | 🌿 [main] | 📁 my-project ✓ | 🟢 ████░░░░░░ 60% free | 💰 $0.91 | ⏳ 2h37m | 🔁 [134i/60,734o]
+🤖 Claude Opus 4.8 | 🌿 [main] | 📁 my-project ✓ | 🟢 ████░░░░░░ 60% free | 💰 $0.91 | 🔋 5h 76% · 7d 58% | ⏳ 2h37m | 🔁 [134i/60,734o]
 ```
 
 ## What it shows
@@ -17,6 +17,7 @@ A compact, colorful status line for [Claude Code](https://claude.com/claude-code
 | 📁 **dir ✓ / ✗** | Working directory basename; `✓` git clean, `✗` uncommitted changes |
 | 🟢 **bar + % free** | Context-window gauge — how much room is left before auto-compact. Fill goes green→yellow→red; icon escalates 🟢→⚡→🔥→🚨. Understands the 1M-token window. |
 | 💰 **$cost** | Session cost, computed from transcript tokens |
+| 🔋 **5h · 7d** | Percent **left** of the 5-hour session limit and the weekly limit, straight from Claude Code's `rate_limits`. Green ≥30%, yellow <30%, red <10%. Only for claude.ai Pro/Max, appears after the first reply. |
 | ⏳ **reset** | Time left in the current rolling 5-hour usage window before the limit resets. Green >2h, yellow <2h, red <30m. Hidden when idle. |
 | 🔁 **[Ni/Mo]** | Total input (`i`, cyan) / output (`o`, magenta) tokens this session |
 
@@ -59,7 +60,7 @@ OUTPUT_COST_PER_MILLION = Decimal(15)
 
 > Note: cost & 🔁 tokens sum every `input_tokens`/`output_tokens` in the transcript, which includes cache reads/writes — so the figure runs higher than the raw billed input. It's a session-activity gauge, not an invoice.
 
-> Note: the ⏳ reset window is **global** across all your projects, not per-session. It's inferred from transcript timestamps under `~/.claude/projects` — the block starts on your first activity (floored to the hour) and resets 5 hours later. Only files touched within the last 5 hours are read, so it stays fast.
+> Note: when Claude Code reports `rate_limits.five_hour.resets_at` (Pro/Max), ⏳ uses it as-is. Otherwise the reset window is **global** across all your projects, not per-session. It's inferred from transcript timestamps under `~/.claude/projects` — the block starts on your first activity (floored to the hour) and resets 5 hours later. Only files touched within the last 5 hours are read, so it stays fast.
 
 ## Credits
 
