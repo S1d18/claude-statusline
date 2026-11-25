@@ -275,9 +275,42 @@ def section_context(data):
     return f"{emoji} {context_bar(pct)} {color('gray', f'{free:.0f}% free')}"
 
 
+# Fallback $/1M (input, output) by model-id prefix — used only when Claude Code
+# doesn't send cost.total_cost_usd. Source: https://www.anthropic.com/pricing#api
+MODEL_PRICES = {
+    "claude-fable-5-2": (8, 40),
+    "claude-fable-5": (10, 50),
+    "claude-opus-5-5": (4, 20),
+    "claude-opus-5": (5, 25),
+    "claude-opus-4": (5, 25),
+    "claude-sonnet-5": (2, 10),
+    "claude-sonnet-4": (3, 15),
+    "claude-haiku-5-5": (0.10, 0.50),
+    "claude-haiku-4": (1, 5),
+}
+
+
+def model_prices(data):
+    mid = ((data.get("model") or {}).get("id") or "").lower()
+    for prefix in sorted(MODEL_PRICES, key=len, reverse=True):
+        if mid.startswith(prefix):
+            i, o = MODEL_PRICES[prefix]
+            return Decimal(str(i)), Decimal(str(o))
+    return INPUT_COST_PER_MILLION, OUTPUT_COST_PER_MILLION
+
+
 def section_cost(data):
-    ic = Decimal(input_tokens(data)) * INPUT_COST_PER_MILLION / Decimal(1_000_000)
-    oc = Decimal(output_tokens(data)) * OUTPUT_COST_PER_MILLION / Decimal(1_000_000)
+    # Preferred: Claude Code's own figure (right per-model prices incl. cache).
+    try:
+        total = (data.get("cost") or {}).get("total_cost_usd")
+        if total is not None:
+            total = float(total)
+            return color("green", f"💰 ${total:.2f}") if total > 0 else None
+    except Exception:
+        pass
+    pin, pout = model_prices(data)
+    ic = Decimal(input_tokens(data)) * pin / Decimal(1_000_000)
+    oc = Decimal(output_tokens(data)) * pout / Decimal(1_000_000)
     total = round(float(ic + oc), 4)
     if total == 0.0:
         return None

@@ -16,7 +16,7 @@ A compact, colorful status line for [Claude Code](https://claude.com/claude-code
 | 🌿 **[branch]** | Git branch — green when clean, red when dirty (hidden outside a repo) |
 | 📁 **dir ✓ / ✗** | Working directory basename; `✓` git clean, `✗` uncommitted changes |
 | 🟢 **bar + % free** | Context-window gauge — how much room is left before auto-compact. Fill goes green→yellow→red; icon escalates 🟢→⚡→🔥→🚨. Understands the 1M-token window. |
-| 💰 **$cost** | Session cost, computed from transcript tokens |
+| 💰 **$cost** | Session cost as reported by Claude Code (`cost.total_cost_usd`, priced for the current model incl. cache) |
 | 🔋 **5h · 7d** | Percent **left** of the 5-hour session limit and the weekly limit, straight from Claude Code's `rate_limits`. Green ≥30%, yellow <30%, red <10%. Only for claude.ai Pro/Max, appears after the first reply. |
 | ⏳ **reset** | Time left in the current rolling 5-hour usage window before the limit resets. Green >2h, yellow <2h, red <30m. Hidden when idle. |
 | 🔁 **[Ni/Mo]** | Total input (`i`, cyan) / output (`o`, magenta) tokens this session |
@@ -49,16 +49,13 @@ Copy `statusline.py` anywhere, then add to `~/.claude/settings.json`:
 }
 ```
 
-## Configure cost
+## Cost
 
-Edit the constants at the top of `statusline.py` to match your [pricing](https://www.anthropic.com/pricing#api):
+💰 shows `cost.total_cost_usd`, which Claude Code computes itself with the right prices for the current model (cache reads/writes included), so nothing needs configuring. It's API-equivalent cost — on a Pro/Max subscription it's an estimate, not your bill.
 
-```python
-INPUT_COST_PER_MILLION  = Decimal(3)
-OUTPUT_COST_PER_MILLION = Decimal(15)
-```
+Only if Claude Code doesn't send that field (older versions) does the script estimate cost from transcript tokens, using the `MODEL_PRICES` table in `statusline.py` (matched by model-id prefix, $/1M input & output tokens). Update it from the [pricing page](https://www.anthropic.com/pricing#api) when new models ship. This fallback counts cache tokens at the full input rate, so it runs high.
 
-> Note: cost & 🔁 tokens sum every `input_tokens`/`output_tokens` in the transcript, which includes cache reads/writes — so the figure runs higher than the raw billed input. It's a session-activity gauge, not an invoice.
+> Note: 🔁 tokens sum every `input_tokens`/`output_tokens` in the transcript, which includes cache reads/writes — it's a session-activity gauge, not an invoice.
 
 > Note: when Claude Code reports `rate_limits.five_hour.resets_at` (Pro/Max), ⏳ uses it as-is. Otherwise the reset window is **global** across all your projects, not per-session. It's inferred from transcript timestamps under `~/.claude/projects` — the block starts on your first activity (floored to the hour) and resets 5 hours later. Only files touched within the last 5 hours are read, so it stays fast.
 
